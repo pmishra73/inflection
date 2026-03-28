@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "portfolio",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-p", "4200", "/Users/prasantmishra/Desktop/repos/portfolio"],
+      "port": 4200
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import String, DateTime, Integer, Float, Text, ForeignKey, Enum as SAEnum, JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from app.database import Base
+import enum
+
+
+class SessionType(str, enum.Enum):
+    meeting = "meeting"
+    call = "call"
+    discussion = "discussion"
+    lecture = "lecture"
+    interview = "interview"
+    other = "other"
+
+
+class SessionStatus(str, enum.Enum):
+    recording = "recording"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False, default="Untitled Session")
+    session_type: Mapped[SessionType] = mapped_column(SAEnum(SessionType), default=SessionType.meeting)
+    status: Mapped[SessionStatus] = mapped_column(SAEnum(SessionStatus), default=SessionStatus.recording)
+
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Transcript — list of {speaker, text, start, end, words}
+    transcript_segments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    full_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Emotion timeline — list of {timestamp, speaker, emotions: {name: score}, dominant_emotion}
+    emotion_timeline: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Overall emotion summary — {dominant_emotions, average_scores, emotional_arc}
+    emotion_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Claude-generated insights
+    insights: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Participants detected
+    participant_count: Mapped[int] = mapped_column(Integer, default=1)
+    participants: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship("User", back_populates="sessions")
+    chunks: Mapped[list["SessionChunk"]] = relationship("SessionChunk", back_populates="session", cascade="all, delete-orphan")
+
+
+class SessionChunk(Base):
+    __tablename__ = "session_chunks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id: Mapped[str] = mapped_column(String, ForeignKey("sessions.id"), nullable=False)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Transcript for this chunk
+    transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transcript_segments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    # Emotion data for this chunk
+    emotions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Text sentiment (from transcript)
+    sentiment: Mapped[str | None] = mapped_column(String, nullable=True)
+    sentiment_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    timestamp_start: Mapped[float] = mapped_column(Float, default=0.0)
+    timestamp_end: Mapped[float] = mapped_column(Float, default=0.0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    session: Mapped["Session"] = relationship("Session", back_populates="chunks")
