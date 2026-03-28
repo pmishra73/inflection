@@ -101,7 +101,20 @@ Return a JSON object with EXACTLY this structure:
   ],
   "follow_up_questions": ["question to reflect on 1", "question 2"],
   "sentiment_overall": "positive|neutral|negative|mixed",
-  "sentiment_score": -1.0 to 1.0
+  "sentiment_score": -1.0 to 1.0,
+  "meeting_minutes": {{
+    "attendees": ["Speaker 1", "Speaker 2"],
+    "agenda_items": ["topic discussed 1", "topic discussed 2"],
+    "discussion_highlights": [
+      {{"topic": "topic name", "summary": "what was discussed", "outcome": "what was decided or concluded"}}
+    ],
+    "decisions_formal": ["formal decision 1", "formal decision 2"],
+    "action_items_formal": [
+      {{"action": "description", "owner": "name or Unknown", "due": "ASAP|This week|Next meeting|TBD"}}
+    ],
+    "next_steps": ["next step 1", "next step 2"],
+    "suggested_next_meeting_agenda": ["item 1", "item 2"]
+  }}
 }}"""
 
     try:
@@ -129,6 +142,119 @@ Return a JSON object with EXACTLY this structure:
     except Exception as e:
         logger.error(f"Claude insights error: {e}")
         return _placeholder_insights()
+
+
+async def answer_memory_query(question: str, sessions_context: list[dict]) -> dict:
+    """
+    Answer a natural-language question about the user's conversation history.
+    sessions_context: list of dicts with keys: id, title, date, type, duration,
+                      topics, summary, decisions, action_items, sentiment, participants.
+    Returns: { answer, referenced_sessions, confidence }
+    """
+    if not client:
+        return {"answer": "Memory query unavailable — API not configured.", "referenced_sessions": [], "confidence": 0}
+
+    context_text = ""
+    for s in sessions_context[:80]:  # cap at 80 sessions to fit context window
+        context_text += f"""
+---
+Session: {s.get('title', 'Untitled')} [{s.get('type', '')}] on {s.get('date', 'unknown date')} ({s.get('duration_min', 0)} min)
+Participants: {', '.join(s.get('participants', [])) or 'unknown'}
+Topics: {', '.join(s.get('topics', [])) or 'not extracted'}
+Summary: {s.get('summary', 'No summary')}
+Decisions: {'; '.join(s.get('decisions', [])) or 'none recorded'}
+Action Items: {'; '.join([f"{a.get('item','')} ({a.get('owner','')})" for a in s.get('action_items', [])]) or 'none'}
+Sentiment: {s.get('sentiment', 'unknown')}
+Session ID: {s.get('id', '')}
+"""
+
+    prompt = f"""You are the user's personal second brain. You have access to transcripts and analyses
+of all their past conversations. Answer their question accurately based only on the data provided.
+Be specific — cite dates, sessions, and exact details when available.
+If you don't have enough data, say so honestly.
+
+USER'S CONVERSATION HISTORY:
+{context_text}
+
+USER'S QUESTION: {question}
+
+Return a JSON object:
+{{
+  "answer": "comprehensive, specific answer citing exact sessions and dates",
+  "referenced_sessions": ["session_id_1", "session_id_2"],
+  "confidence": 0.0-1.0,
+  "follow_up_suggestions": ["related question to explore 1", "question 2"]
+}}"""
+
+    try:
+        response = await client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+            system="You are a personal AI memory assistant with access to the user's complete conversation history. Be precise, cite specific sessions, and give genuinely useful answers.",
+        )
+        text = response.content[0].text.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        return json.loads(text)
+    except Exception as e:
+        logger.error(f"Memory query error: {e}")
+        return {"answer": "Unable to process query at this time.", "referenced_sessions": [], "confidence": 0}
+
+
+async def generate_longitudinal_profile(sessions_context: list[dict]) -> dict:
+    """
+    Generate a longitudinal EQ profile from all sessions.
+    Identifies communication patterns, emotional trends, and growth areas.
+    """
+    if not client or not sessions_context:
+        return {}
+
+    recent = sessions_context[:30]
+    context_text = "\n".join([
+        f"- {s.get('date')}: {s.get('title')} | Valence: {s.get('valence', 0):.2f} | "
+        f"Arousal: {s.get('arousal', 0.5):.2f} | Dominant emotion: {s.get('dominant_emotion', 'unknown')} | "
+        f"Topics: {', '.join(s.get('topics', [])[:3])}"
+        for s in recent
+    ])
+
+    prompt = f"""Analyze this person's communication and emotional intelligence patterns over time.
+
+SESSION HISTORY (most recent first):
+{context_text}
+
+Return JSON:
+{{
+  "overall_eq_score": 0-100,
+  "eq_description": "1-2 sentence EQ profile summary",
+  "dominant_communication_style": "e.g. analytical, empathetic, assertive, reserved",
+  "emotional_range": "e.g. wide range, emotionally consistent, tends toward positive",
+  "top_strengths": ["strength 1", "strength 2", "strength 3"],
+  "growth_areas": ["area 1", "area 2"],
+  "emotional_trend": "improving|stable|declining",
+  "trend_explanation": "why the trend is what it is",
+  "recurring_patterns": ["pattern 1", "pattern 2"],
+  "top_topics_of_life": ["topic 1", "topic 2", "topic 3"],
+  "coaching_tip": "one personalised coaching recommendation"
+}}"""
+
+    try:
+        response = await client.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        return json.loads(text)
+    except Exception as e:
+        logger.error(f"Longitudinal profile error: {e}")
+        return {}
 
 
 async def generate_realtime_nudge(

@@ -4,11 +4,12 @@ Handles real-time chunk processing and post-session insight generation.
 """
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.session import Session, SessionChunk, SessionStatus
+from app.models.topic import Topic
 from app.services.deepgram_service import transcribe_audio_chunk
 from app.services.hume_service import analyze_audio_emotion
 from app.services.elevenlabs_service import transcribe_full_audio
@@ -169,6 +170,14 @@ async def finalize_session(
         duration_seconds=duration,
     )
 
+    # Extract meeting minutes and topics from insights
+    meeting_minutes = insights.pop("meeting_minutes", None)
+    topics_raw = insights.get("key_topics", [])
+    topics = [t.strip().lower() for t in topics_raw if t.strip()]
+
+    # Data retention: full transcript/audio expires 1 year from now; metadata kept forever
+    full_data_expires = datetime.utcnow() + timedelta(days=365)
+
     # Update session
     session.status = SessionStatus.completed
     session.ended_at = datetime.utcnow()
@@ -178,11 +187,17 @@ async def finalize_session(
     session.emotion_timeline = emotion_timeline
     session.emotion_summary = emotion_summary
     session.insights = insights
+    session.meeting_minutes = meeting_minutes
+    session.topics = topics
+    session.full_data_expires_at = full_data_expires
     session.participant_count = participant_count
     session.participants = list(speakers)
 
     await db.commit()
     await db.refresh(session)
+
+    # Upsert topics into cross-session Topic index
+    await _upsert_topics(session.user_id, topics, db)
 
     return {
         "type": "session_complete",
@@ -192,6 +207,28 @@ async def finalize_session(
         "insights_preview": insights.get("summary", ""),
         "dominant_emotion": emotion_summary.get("dominant_emotion", "Neutral"),
     }
+
+
+async def _upsert_topics(user_id: str, topics: list[str], db: AsyncSession) -> None:
+    """
+    Upsert topics into the cross-session Topic index.
+    If topic exists for user → increment count + update last_seen.
+    If new → create it.
+    """
+    if not topics:
+        return
+    now = datetime.utcnow()
+    for name in topics:
+        result = await db.execute(
+            select(Topic).where(Topic.user_id == user_id, Topic.name == name)
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.session_count += 1
+            existing.last_seen = now
+        else:
+            db.add(Topic(user_id=user_id, name=name, session_count=1, first_seen=now, last_seen=now))
+    await db.commit()
 
 
 def _compile_transcript(chunks: list) -> tuple[str, list]:

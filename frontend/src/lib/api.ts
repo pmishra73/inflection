@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { User, Session, SessionListItem, SessionType } from "@/types";
+import type { User, Session, SessionListItem, SessionType, Topic, MemoryQueryResponse } from "@/types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -55,6 +55,29 @@ export const sessionsApi = {
 
   getAudioSummaryUrl: (id: string) =>
     `${API_BASE}/api/v1/sessions/${id}/audio-summary`,
+};
+
+// Memory / Second Brain
+export const memoryApi = {
+  query: (question: string) =>
+    api.post<MemoryQueryResponse>("/memory/query", { question }),
+
+  topics: (limit = 50) =>
+    api.get<Topic[]>("/memory/topics", { params: { limit } }),
+
+  topicSessions: (topicName: string, limit = 20) =>
+    api.get("/memory/topics/" + encodeURIComponent(topicName) + "/sessions", { params: { limit } }),
+
+  profile: () => api.get("/memory/profile"),
+
+  timeline: (params?: {
+    limit?: number;
+    offset?: number;
+    topic?: string;
+    session_type?: string;
+    date_from?: string;
+    date_to?: string;
+  }) => api.get("/memory/timeline", { params }),
 };
 
 export default api;

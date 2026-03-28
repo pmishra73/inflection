@@ -6,10 +6,10 @@ import { motion } from "framer-motion";
 import {
   ArrowLeft, Clock, Users, Brain, TrendingUp, AlertTriangle, CheckSquare,
   MessageSquare, Volume2, ChevronDown, ChevronRight, Lightbulb, Target,
-  BarChart2, Mic,
+  BarChart2, Mic, FileText, Tag, Shield, CalendarDays, UserCheck, Loader2,
 } from "lucide-react";
 import { sessionsApi } from "@/lib/api";
-import { TranscriptSegment, EmotionTimelineEntry, ActionItem } from "@/types";
+import { TranscriptSegment, EmotionTimelineEntry, ActionItem, MeetingMinutes } from "@/types";
 import {
   formatSessionDuration, formatRelativeTime, getEmotionColor,
   getValenceLabel, getArousalLabel, cn,
@@ -53,6 +53,7 @@ function SessionReportContent() {
   const searchParams = useSearchParams();
   const id = searchParams.get("id") ?? "";
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioLoading, setAudioLoading] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem("inflection_token")) router.push("/");
@@ -67,12 +68,18 @@ function SessionReportContent() {
   });
 
   const handlePlaySummary = async () => {
-    const url = sessionsApi.getAudioSummaryUrl(id);
-    const token = localStorage.getItem("inflection_token");
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (res.ok) {
-      const blob = await res.blob();
-      setAudioUrl(URL.createObjectURL(blob));
+    if (audioUrl) { setAudioUrl(null); return; }
+    setAudioLoading(true);
+    try {
+      const url = sessionsApi.getAudioSummaryUrl(id);
+      const token = localStorage.getItem("inflection_token");
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const blob = await res.blob();
+        setAudioUrl(URL.createObjectURL(blob));
+      }
+    } finally {
+      setAudioLoading(false);
     }
   };
 
@@ -154,16 +161,34 @@ function SessionReportContent() {
               </div>
             </div>
           </div>
-          <button onClick={handlePlaySummary} className="btn-secondary flex items-center gap-2 text-sm">
-            <Volume2 size={15} />
-            Hear Summary
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            <button
+              onClick={handlePlaySummary}
+              disabled={audioLoading}
+              className="btn-secondary flex items-center gap-2 text-sm"
+            >
+              {audioLoading
+                ? <Loader2 size={15} className="animate-spin" />
+                : <Volume2 size={15} />}
+              {audioUrl ? "Hide Audio" : "Hear Summary"}
+            </button>
+            {session.full_data_expires_at && (
+              <div className="flex items-center gap-1.5 text-[11px] text-text-muted">
+                <Shield size={10} />
+                Full data until {new Date(session.full_data_expires_at).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                &nbsp;·&nbsp;Metadata forever
+              </div>
+            )}
+          </div>
         </motion.div>
 
         {audioUrl && (
           <div className="mb-6 glass-card p-4">
-            <p className="text-xs text-text-muted mb-2">AI Summary Audio (ElevenLabs)</p>
-            <audio controls src={audioUrl} className="w-full h-10" />
+            <div className="flex items-center gap-2 mb-2">
+              <Volume2 size={14} className="text-primary-light" />
+              <p className="text-xs font-medium text-text-secondary">AI Summary — read aloud by ElevenLabs</p>
+            </div>
+            <audio controls autoPlay src={audioUrl} className="w-full h-10" />
           </div>
         )}
 
@@ -190,11 +215,151 @@ function SessionReportContent() {
             {insights?.summary && (
               <Section title="Executive Summary" icon={Brain}>
                 <p className="text-text-secondary text-sm leading-relaxed">{insights.summary}</p>
-                {insights.key_topics?.length > 0 && (
+                {(session.topics?.length || insights.key_topics?.length) ? (
                   <div className="flex flex-wrap gap-2 mt-4">
-                    {insights.key_topics.map((t) => <span key={t} className="badge bg-primary/10 text-primary-light border border-primary/20">{t}</span>)}
+                    {(session.topics || insights.key_topics || []).map((t: string) => (
+                      <span key={t} className="badge bg-primary/10 text-primary-light border border-primary/20 flex items-center gap-1">
+                        <Tag size={9} />{t}
+                      </span>
+                    ))}
                   </div>
-                )}
+                ) : null}
+              </Section>
+            )}
+
+            {session.meeting_minutes && (
+              <Section title="Meeting Minutes" icon={FileText} defaultOpen={false}>
+                {(() => {
+                  const mm = session.meeting_minutes as MeetingMinutes;
+                  return (
+                    <div className="space-y-5">
+                      {/* Attendees */}
+                      {mm.attendees?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <UserCheck size={12} /> Attendees
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {mm.attendees.map((a: string) => (
+                              <span key={a} className="text-xs px-2.5 py-1 rounded-full bg-surface-2 border border-border text-text-secondary">{a}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Agenda */}
+                      {mm.agenda_items?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <CalendarDays size={12} /> Agenda
+                          </div>
+                          <ol className="space-y-1">
+                            {mm.agenda_items.map((item: string, i: number) => (
+                              <li key={i} className="text-sm text-text-secondary flex items-start gap-2">
+                                <span className="text-text-muted text-xs mt-0.5 font-mono w-4 flex-shrink-0">{i + 1}.</span>
+                                {item}
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+
+                      {/* Discussion highlights */}
+                      {mm.discussion_highlights?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <MessageSquare size={12} /> Discussion Highlights
+                          </div>
+                          <div className="space-y-3">
+                            {mm.discussion_highlights.map((d: { topic: string; summary: string; outcome: string }, i: number) => (
+                              <div key={i} className="p-3 rounded-xl bg-surface-2 space-y-1">
+                                <p className="text-xs font-semibold text-text-primary">{d.topic}</p>
+                                <p className="text-xs text-text-secondary">{d.summary}</p>
+                                {d.outcome && (
+                                  <p className="text-xs text-accent-green flex items-center gap-1 mt-1">
+                                    <CheckSquare size={10} /> {d.outcome}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Formal decisions */}
+                      {mm.decisions_formal?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <CheckSquare size={12} /> Decisions
+                          </div>
+                          <ul className="space-y-1.5">
+                            {mm.decisions_formal.map((d: string, i: number) => (
+                              <li key={i} className="text-sm text-text-secondary flex items-start gap-2">
+                                <span className="text-accent-green mt-0.5 flex-shrink-0">✓</span>{d}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Formal action items */}
+                      {mm.action_items_formal?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <Target size={12} /> Action Items
+                          </div>
+                          <div className="space-y-2">
+                            {mm.action_items_formal.map((a: { action: string; owner: string; due: string }, i: number) => (
+                              <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-surface-2">
+                                <div className="flex-1">
+                                  <p className="text-sm text-text-secondary">{a.action}</p>
+                                  <div className="flex items-center gap-3 mt-1">
+                                    {a.owner && a.owner !== "Unknown" && (
+                                      <span className="text-xs text-text-muted flex items-center gap-1"><UserCheck size={10} />{a.owner}</span>
+                                    )}
+                                    <span className="text-xs text-accent-yellow flex items-center gap-1">
+                                      <CalendarDays size={10} />{a.due}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Next steps */}
+                      {mm.next_steps?.length > 0 && (
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-medium text-text-muted mb-2">
+                            <ChevronRight size={12} /> Next Steps
+                          </div>
+                          <ul className="space-y-1.5">
+                            {mm.next_steps.map((s: string, i: number) => (
+                              <li key={i} className="text-sm text-text-secondary flex items-start gap-2">
+                                <span className="text-primary-light mt-0.5 flex-shrink-0">→</span>{s}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Suggested next meeting agenda */}
+                      {mm.suggested_next_meeting_agenda?.length > 0 && (
+                        <div className="p-3 rounded-xl bg-primary/5 border border-primary/15">
+                          <p className="text-xs font-medium text-primary-light mb-2">Suggested Next Meeting Agenda</p>
+                          <ul className="space-y-1">
+                            {mm.suggested_next_meeting_agenda.map((item: string, i: number) => (
+                              <li key={i} className="text-xs text-text-secondary flex items-start gap-2">
+                                <span className="text-text-muted flex-shrink-0">{i + 1}.</span>{item}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </Section>
             )}
 

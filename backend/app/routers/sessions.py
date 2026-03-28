@@ -103,7 +103,7 @@ async def delete_session(
     return Response(status_code=204)
 
 
-@router.get("/:session_id/audio-summary")
+@router.get("/{session_id}/audio-summary")
 async def get_audio_summary(
     session_id: str,
     current_user: User = Depends(get_current_user),

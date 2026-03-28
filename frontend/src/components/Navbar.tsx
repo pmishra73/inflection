@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Mic, LayoutDashboard, Settings, LogOut, User } from "lucide-react";
+import { Mic, LayoutDashboard, Brain, TrendingUp, LogOut, User } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { authApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,8 @@ export default function Navbar() {
 
   const navLinks = [
     { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard" },
+    { href: "/memory", icon: Brain, label: "Memory" },
+    { href: "/profile", icon: TrendingUp, label: "EQ Profile" },
   ];
 
   return (

@@ -70,6 +70,38 @@ export interface SpeakerProfile {
   key_contributions: string[];
 }
 
+export interface MeetingMinutes {
+  attendees: string[];
+  agenda_items: string[];
+  discussion_highlights: Array<{ topic: string; summary: string; outcome: string }>;
+  decisions_formal: string[];
+  action_items_formal: Array<{ action: string; owner: string; due: string }>;
+  next_steps: string[];
+  suggested_next_meeting_agenda: string[];
+}
+
+export interface Topic {
+  id: string;
+  name: string;
+  session_count: number;
+  first_seen: string;
+  last_seen: string;
+}
+
+export interface MemoryQueryResponse {
+  answer: string;
+  referenced_sessions: Array<{
+    id: string;
+    title: string;
+    date: string;
+    type: string;
+    duration_seconds: number | null;
+  }>;
+  confidence: number;
+  follow_up_suggestions: string[];
+  total_sessions_searched: number;
+}
+
 export interface SessionInsights {
   summary: string;
   key_topics: string[];
@@ -116,6 +148,9 @@ export interface Session {
   emotion_timeline: EmotionTimelineEntry[] | null;
   emotion_summary: EmotionSummary | null;
   insights: SessionInsights | null;
+  meeting_minutes: MeetingMinutes | null;
+  topics: string[] | null;
+  full_data_expires_at: string | null;
   participant_count: number;
   participants: string[] | null;
   created_at: string;
