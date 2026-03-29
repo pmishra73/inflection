@@ -151,6 +151,11 @@ export interface Session {
   meeting_minutes: MeetingMinutes | null;
   topics: string[] | null;
   full_data_expires_at: string | null;
+  drive_file_id: string | null;
+  drive_file_path: string | null;
+  audio_checksum: string | null;
+  audio_size_bytes: number | null;
+  audio_mime_type: string | null;
   participant_count: number;
   participants: string[] | null;
   created_at: string;

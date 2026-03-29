@@ -7,8 +7,9 @@ import {
   ArrowLeft, Clock, Users, Brain, TrendingUp, AlertTriangle, CheckSquare,
   MessageSquare, Volume2, ChevronDown, ChevronRight, Lightbulb, Target,
   BarChart2, Mic, FileText, Tag, Shield, CalendarDays, UserCheck, Loader2,
+  HardDrive, Download, Lock,
 } from "lucide-react";
-import { sessionsApi } from "@/lib/api";
+import { sessionsApi, driveApi } from "@/lib/api";
 import { TranscriptSegment, EmotionTimelineEntry, ActionItem, MeetingMinutes } from "@/types";
 import {
   formatSessionDuration, formatRelativeTime, getEmotionColor,
@@ -54,11 +55,40 @@ function SessionReportContent() {
   const id = searchParams.get("id") ?? "";
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
+  const [driveAudioUrl, setDriveAudioUrl] = useState<string | null>(null);
+  const [driveAudioLoading, setDriveAudioLoading] = useState(false);
 
   useEffect(() => {
     if (!localStorage.getItem("inflection_token")) router.push("/");
     if (!id) router.push("/dashboard");
   }, [router, id]);
+
+  const { data: driveStatus } = useQuery({
+    queryKey: ["drive-status"],
+    queryFn: () => driveApi.status().then((r) => r.data),
+    enabled: !!id,
+  });
+
+  const handlePlayDriveAudio = async () => {
+    if (driveAudioUrl) { setDriveAudioUrl(null); return; }
+    setDriveAudioLoading(true);
+    try {
+      const url = driveApi.getAudioUrl(id);
+      const token = localStorage.getItem("inflection_token");
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const blob = await res.blob();
+        setDriveAudioUrl(URL.createObjectURL(blob));
+      } else {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to load recording");
+      }
+    } catch (e: any) {
+      alert(e.message || "Could not load recording from Drive");
+    } finally {
+      setDriveAudioLoading(false);
+    }
+  };
 
   const { data: session, isLoading, error } = useQuery({
     queryKey: ["session", id],
@@ -183,12 +213,84 @@ function SessionReportContent() {
         </motion.div>
 
         {audioUrl && (
-          <div className="mb-6 glass-card p-4">
+          <div className="mb-4 glass-card p-4">
             <div className="flex items-center gap-2 mb-2">
               <Volume2 size={14} className="text-primary-light" />
               <p className="text-xs font-medium text-text-secondary">AI Summary — read aloud by ElevenLabs</p>
             </div>
             <audio controls autoPlay src={audioUrl} className="w-full h-10" />
+          </div>
+        )}
+
+        {/* Drive audio recording player */}
+        {session?.drive_file_id && (
+          <div className="mb-6 glass-card p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <HardDrive size={14} className="text-accent-green" />
+                <p className="text-xs font-medium text-text-secondary">Original Recording</p>
+                <span className="flex items-center gap-1 text-[10px] text-accent-green">
+                  <Lock size={9} /> AES-256 encrypted in your Drive
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {session.audio_checksum && (
+                  <span className="text-[10px] text-text-muted font-mono" title="SHA-256 checksum of raw audio">
+                    SHA256: {session.audio_checksum.slice(0, 12)}…
+                  </span>
+                )}
+                {session.audio_size_bytes && (
+                  <span className="text-[10px] text-text-muted">
+                    {(session.audio_size_bytes / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {!driveStatus?.connected ? (
+              <div className="flex items-center gap-2 text-xs text-text-muted p-2 rounded-lg bg-surface-2">
+                <AlertTriangle size={12} className="text-accent-yellow" />
+                Reconnect Google Drive in{" "}
+                <a href="/settings" className="text-primary-light hover:underline">Settings</a>{" "}
+                to access this recording.
+              </div>
+            ) : driveAudioUrl ? (
+              <div>
+                <audio controls autoPlay src={driveAudioUrl} className="w-full h-10 mb-2" />
+                <div className="flex items-center gap-2">
+                  <a
+                    href={driveAudioUrl}
+                    download={`${session.title}.webm`}
+                    className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors"
+                  >
+                    <Download size={12} /> Download recording
+                  </a>
+                  <button
+                    onClick={() => setDriveAudioUrl(null)}
+                    className="text-xs text-text-muted hover:text-text-secondary ml-auto"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={handlePlayDriveAudio}
+                disabled={driveAudioLoading}
+                className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-accent-green/10 hover:bg-accent-green/20 border border-accent-green/20 text-accent-green transition-all disabled:opacity-50"
+              >
+                {driveAudioLoading
+                  ? <Loader2 size={13} className="animate-spin" />
+                  : <HardDrive size={13} />}
+                {driveAudioLoading ? "Decrypting & loading…" : "Play Recording from Drive"}
+              </button>
+            )}
+
+            {session.drive_file_path && (
+              <p className="text-[10px] text-text-muted mt-2 font-mono">
+                📁 {session.drive_file_path}
+              </p>
+            )}
           </div>
         )}
 

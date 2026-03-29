@@ -57,6 +57,14 @@ export const sessionsApi = {
     `${API_BASE}/api/v1/sessions/${id}/audio-summary`,
 };
 
+// Google Drive
+export const driveApi = {
+  status: () => api.get<{ connected: boolean; email: string | null; root_folder_id: string | null; configured: boolean }>("/drive/status"),
+  getAuthUrl: () => api.get<{ auth_url: string }>("/drive/auth-url"),
+  disconnect: () => api.delete("/drive/disconnect"),
+  getAudioUrl: (sessionId: string) => `${API_BASE}/api/v1/sessions/${sessionId}/audio`,
+};
+
 // Memory / Second Brain
 export const memoryApi = {
   query: (question: string) =>

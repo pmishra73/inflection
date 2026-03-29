@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     HUME_SECRET_KEY: str = ""
     ELEVENLABS_API_KEY: str = ""
 
+    # Google Drive OAuth (scope: drive.file — only files created by this app)
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/drive/callback"
+
     # CORS
     FRONTEND_URL: str = "http://localhost:3000"
 

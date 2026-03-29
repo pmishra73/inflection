@@ -7,7 +7,7 @@ import logging
 from app.config import settings
 from app.database import init_db
 from app.routers import auth, sessions, ws
-from app.routers import memory
+from app.routers import memory, drive
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,6 +45,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(memory.router, prefix="/api/v1")
+app.include_router(drive.router, prefix="/api/v1")
 app.include_router(ws.router)
 
 

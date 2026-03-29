@@ -103,6 +103,44 @@ async def delete_session(
     return Response(status_code=204)
 
 
+@router.get("/{session_id}/audio")
+async def stream_session_audio(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Download + decrypt the session's audio from Google Drive.
+    Decryption key is derived server-side — never exposed to client.
+    """
+    from app.services.drive_service import download_encrypted_audio, decrypt_audio, decrypt_token
+    import json
+
+    result = await db.execute(
+        select(Session).where(Session.id == session_id, Session.user_id == current_user.id)
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.drive_file_id:
+        raise HTTPException(status_code=404, detail="No audio recording stored for this session")
+    if not current_user.drive_connected or not current_user.drive_refresh_token_enc:
+        raise HTTPException(status_code=403, detail="Google Drive not connected — reconnect to access recordings")
+
+    try:
+        token_json = decrypt_token(current_user.drive_refresh_token_enc)
+        encrypted_bytes = download_encrypted_audio(session.drive_file_id, token_json)
+        raw_audio = decrypt_audio(encrypted_bytes, current_user.id, session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to retrieve audio: {str(e)}")
+
+    mime = session.audio_mime_type or "audio/webm"
+    return Response(content=raw_audio, media_type=mime, headers={
+        "Content-Disposition": f'attachment; filename="{session.title}.webm"',
+        "Content-Length": str(len(raw_audio)),
+    })
+
+
 @router.get("/{session_id}/audio-summary")
 async def get_audio_summary(
     session_id: str,

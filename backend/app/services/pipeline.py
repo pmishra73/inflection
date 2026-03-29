@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.models.session import Session, SessionChunk, SessionStatus
 from app.models.topic import Topic
+from app.models.user import User
 from app.services.deepgram_service import transcribe_audio_chunk
 from app.services.hume_service import analyze_audio_emotion
 from app.services.elevenlabs_service import transcribe_full_audio
@@ -199,6 +200,10 @@ async def finalize_session(
     # Upsert topics into cross-session Topic index
     await _upsert_topics(session.user_id, topics, db)
 
+    # Encrypt and upload audio to user's Google Drive (if connected)
+    if full_audio_bytes and len(full_audio_bytes) > 500:
+        await _upload_audio_to_drive(session, full_audio_bytes, mime_type, db)
+
     return {
         "type": "session_complete",
         "session_id": session_id,
@@ -207,6 +212,63 @@ async def finalize_session(
         "insights_preview": insights.get("summary", ""),
         "dominant_emotion": emotion_summary.get("dominant_emotion", "Neutral"),
     }
+
+
+async def _upload_audio_to_drive(session: Session, audio_bytes: bytes, mime_type: str, db: AsyncSession) -> None:
+    """
+    Encrypt the session audio with AES-256-GCM and upload to the user's Google Drive.
+    Key is derived from SECRET_KEY + user_id + session_id — never stored.
+    Skips silently if Drive is not connected or any error occurs.
+    """
+    try:
+        # Load user to check Drive connection
+        user_result = await db.execute(select(User).where(User.id == session.user_id))
+        user = user_result.scalar_one_or_none()
+        if not user or not user.drive_connected or not user.drive_refresh_token_enc:
+            return  # Drive not connected — skip
+
+        from app.services.drive_service import (
+            encrypt_audio, upload_encrypted_audio, decrypt_token
+        )
+        import json
+
+        # Decrypt the stored refresh token
+        token_json = decrypt_token(user.drive_refresh_token_enc)
+
+        # Encrypt the audio
+        encrypted_bytes, checksum = encrypt_audio(audio_bytes, session.user_id, session.id)
+
+        # Build filename from session title (sanitised)
+        safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in session.title)[:60]
+        filename = f"{safe_name}.enc"
+
+        # Upload to Drive
+        file_id, drive_path, root_folder_id = await upload_encrypted_audio(
+            encrypted_bytes=encrypted_bytes,
+            filename=filename,
+            session_type=session.session_type.value,
+            session_date=session.started_at or datetime.utcnow(),
+            token_json=token_json,
+            root_folder_id=user.drive_root_folder_id,
+        )
+
+        # Persist Drive metadata on session
+        session.drive_file_id = file_id
+        session.drive_file_path = drive_path
+        session.audio_checksum = checksum
+        session.audio_size_bytes = len(audio_bytes)
+        session.audio_mime_type = mime_type
+
+        # Persist root folder ID on user (so we reuse the same folder)
+        if not user.drive_root_folder_id:
+            user.drive_root_folder_id = root_folder_id
+
+        await db.commit()
+        logger.info(f"Audio uploaded to Drive for session {session.id}: {drive_path}")
+
+    except Exception as e:
+        logger.error(f"Drive upload failed for session {session.id}: {e}")
+        # Non-fatal — session data is already saved, just no Drive backup
 
 
 async def _upsert_topics(user_id: str, topics: list[str], db: AsyncSession) -> None:
