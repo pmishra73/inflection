@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Mic } from "lucide-react";
+import { X, Mic, Check } from "lucide-react";
 import toast from "react-hot-toast";
 import { sessionsApi } from "@/lib/api";
 import { Session, SessionType } from "@/types";
@@ -16,20 +16,42 @@ const SESSION_TYPES: { type: SessionType; label: string; icon: string; desc: str
   { type: "other", label: "Other", icon: "📝", desc: "Any conversation" },
 ];
 
+const buildDefaultName = (type: SessionType) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const now = new Date();
+  const ts = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+  return `${type}_${ts}`;
+};
+
 interface Props {
   onClose: () => void;
   onCreated: (session: Session) => void;
 }
 
 export default function NewSessionModal({ onClose, onCreated }: Props) {
-  const [title, setTitle] = useState("");
+  const [useDefault, setUseDefault] = useState(true);
+  const [customTitle, setCustomTitle] = useState("");
   const [selectedType, setSelectedType] = useState<SessionType>("meeting");
   const [loading, setLoading] = useState(false);
 
+  // Keep the default name preview in sync with the selected type
+  const defaultName = buildDefaultName(selectedType);
+  const effectiveTitle = useDefault ? defaultName : customTitle;
+
+  // When user switches type while in default mode, no action needed (computed above)
+  // When user unchecks default, pre-fill the input with the current default so it's easy to edit
+  const handleToggleDefault = () => {
+    if (useDefault) {
+      setCustomTitle(defaultName); // pre-fill with current default as starting point
+    }
+    setUseDefault((v) => !v);
+  };
+
   const handleCreate = async () => {
+    const finalTitle = effectiveTitle.trim() || defaultName;
     setLoading(true);
     try {
-      const res = await sessionsApi.create(title || `${selectedType} — ${new Date().toLocaleDateString()}`, selectedType);
+      const res = await sessionsApi.create(finalTitle, selectedType);
       onCreated(res.data);
     } catch {
       toast.error("Failed to create session");
@@ -54,6 +76,7 @@ export default function NewSessionModal({ onClose, onCreated }: Props) {
           exit={{ opacity: 0, scale: 0.95 }}
           transition={{ duration: 0.2 }}
         >
+          {/* Header */}
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center">
@@ -69,21 +92,54 @@ export default function NewSessionModal({ onClose, onCreated }: Props) {
             </button>
           </div>
 
-          {/* Title */}
+          {/* Session Name */}
           <div className="mb-5">
-            <label className="label">Session Name</label>
-            <input
-              type="text"
-              className="input"
-              placeholder={`${selectedType.charAt(0).toUpperCase() + selectedType.slice(1)} — ${new Date().toLocaleDateString()}`}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-            />
+            <div className="flex items-center justify-between mb-2">
+              <label className="label mb-0">Session Name</label>
+
+              {/* Default name toggle */}
+              <button
+                type="button"
+                onClick={handleToggleDefault}
+                className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-secondary transition-colors select-none"
+              >
+                <div className={cn(
+                  "w-4 h-4 rounded flex items-center justify-center border transition-all flex-shrink-0",
+                  useDefault
+                    ? "bg-primary border-primary"
+                    : "bg-surface-2 border-border"
+                )}>
+                  {useDefault && <Check size={10} className="text-white" strokeWidth={3} />}
+                </div>
+                Use default name
+              </button>
+            </div>
+
+            {useDefault ? (
+              /* Read-only preview of the auto-generated name */
+              <div className="input flex items-center gap-2 cursor-default opacity-70 select-none">
+                <span className="text-text-muted font-mono text-sm truncate">{defaultName}</span>
+                <span className="ml-auto text-[10px] text-text-muted whitespace-nowrap flex-shrink-0">auto-generated</span>
+              </div>
+            ) : (
+              /* Editable custom name */
+              <input
+                type="text"
+                className="input"
+                placeholder={defaultName}
+                value={customTitle}
+                onChange={(e) => setCustomTitle(e.target.value)}
+                autoFocus
+              />
+            )}
+
+            <p className="text-[11px] text-text-muted mt-1.5">
+              You can rename this recording anytime from the session report.
+            </p>
           </div>
 
-          {/* Type */}
-          <div className="mb-6">
+          {/* Session Type */}
+          <div className="mb-5">
             <label className="label">Session Type</label>
             <div className="grid grid-cols-3 gap-2">
               {SESSION_TYPES.map(({ type, label, icon, desc }) => (
@@ -116,8 +172,14 @@ export default function NewSessionModal({ onClose, onCreated }: Props) {
 
           <div className="flex gap-3">
             <button onClick={onClose} className="btn-secondary flex-1">Cancel</button>
-            <button onClick={handleCreate} disabled={loading} className="btn-primary flex-1 flex items-center justify-center gap-2">
-              {loading ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Mic size={16} />}
+            <button
+              onClick={handleCreate}
+              disabled={loading}
+              className="btn-primary flex-1 flex items-center justify-center gap-2"
+            >
+              {loading
+                ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                : <Mic size={16} />}
               Start Recording
             </button>
           </div>
